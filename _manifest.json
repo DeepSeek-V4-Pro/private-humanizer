@@ -1,0 +1,42 @@
+{
+  "manifest_version": 2,
+  "id": "deepseek-v4-pro.private-humanizer",
+  "version": "1.0.0",
+  "name": "麦麦私聊拟人化增强（深度优化版）",
+  "description": "基于 Fucarlosm/private-humanizer 深度优化。增强私聊真实感：注入时间感与对象画像，守卫回复防止无证据编造、纪念日猜测与小说化回复，拦截可疑记忆写入，支持智能主动续话。提示词全面重写，配置重置为安全默认值。",
+  "author": {
+    "name": "DeepSeek-V4",
+    "url": "https://github.com/DeepSeek-V4-Pro"
+  },
+  "license": "MIT",
+  "urls": {
+    "repository": "https://github.com/DeepSeek-V4-Pro/private-humanizer",
+    "homepage": "https://github.com/DeepSeek-V4-Pro/private-humanizer"
+  },
+  "host_application": {
+    "min_version": "1.0.0",
+    "max_version": "1.99.99"
+  },
+  "sdk": {
+    "min_version": "1.0.0",
+    "max_version": "2.99.99"
+  },
+  "dependencies": [],
+  "plugin_type": "extension",
+  "display": {
+    "icon": {
+      "type": "lucide",
+      "value": "shield-check"
+    }
+  },
+  "capabilities": [
+    "trigger_proactive",
+    "maisaka.proactive.trigger"
+  ],
+  "i18n": {
+    "default_locale": "zh-CN",
+    "supported_locales": [
+      "zh-CN"
+    ]
+  }
+}
