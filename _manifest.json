@@ -30,7 +30,6 @@
     }
   },
   "capabilities": [
-    "trigger_proactive",
     "maisaka.proactive.trigger"
   ],
   "i18n": {

@@ -626,11 +626,10 @@ class PrivateHumanizerPlugin(MaiBotPlugin):
         try:
             await asyncio.sleep(config.proactive_followup.delay_seconds)
             intent = INTIMATE_FOLLOWUP_INTENT if intimate_context else config.proactive_followup.intent
-            result = await self.ctx.maisaka.trigger_proactive(
-                session_id,
-                intent,
+            result = await self.ctx.maisaka.proactive.trigger(
+                stream_id=session_id,
+                intent=intent,
                 reason="private_humanizer_followup",
-                priority="low",
                 metadata={
                     "source": "private_humanizer",
                     "last_reply_preview": (response_text or "").strip()[:120],
