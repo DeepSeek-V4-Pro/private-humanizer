@@ -139,8 +139,8 @@ class GuardConfig(PluginConfigBase):
     anniversary_guard_enabled: bool = Field(default=True, title="纪念日守卫", description="防止乱猜日期和相遇天数。")
     style_guard_enabled: bool = Field(default=True, title="风格守卫", description="减少过长、过度动作化和小说化回复。")
     memory_guard_enabled: bool = Field(default=True, title="记忆守卫", description="阻止模型自创个人事实进入表达学习。")
-    max_reply_chars_soft: int = Field(default=80, title="软长度阈值", description="超过后更容易触发压缩。")
-    max_reply_chars_hard: int = Field(default=160, title="硬长度上限", description="高风险长回复会被压缩到附近。")
+    max_reply_chars_soft: int = Field(default=400, title="软长度阈值", description="超过后更容易触发压缩。")
+    max_reply_chars_hard: int = Field(default=800, title="硬长度上限", description="高风险长回复会被压缩到附近。")
 
 
 class ProactiveFollowupConfig(PluginConfigBase):

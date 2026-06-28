@@ -74,8 +74,8 @@ class GuardSection:
     anniversary_guard_enabled: bool = True
     style_guard_enabled: bool = True
     memory_guard_enabled: bool = True
-    max_reply_chars_soft: int = 80
-    max_reply_chars_hard: int = 160
+    max_reply_chars_soft: int = 400
+    max_reply_chars_hard: int = 800
 
 
 @dataclass(slots=True)
@@ -243,8 +243,8 @@ def load_config(raw: dict[str, Any] | None) -> HumanizerConfig:
             anniversary_guard_enabled=bool(guard.get("anniversary_guard_enabled", True)),
             style_guard_enabled=bool(guard.get("style_guard_enabled", True)),
             memory_guard_enabled=bool(guard.get("memory_guard_enabled", True)),
-            max_reply_chars_soft=_safe_int(guard.get("max_reply_chars_soft", 80), 80),
-            max_reply_chars_hard=_safe_int(guard.get("max_reply_chars_hard", 160), 160),
+            max_reply_chars_soft=_safe_int(guard.get("max_reply_chars_soft", 400), 400),
+            max_reply_chars_hard=_safe_int(guard.get("max_reply_chars_hard", 800), 800),
         ),
         proactive_followup=ProactiveFollowupSection(
             enabled=bool(proactive_followup.get("enabled", True)),

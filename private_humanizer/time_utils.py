@@ -103,7 +103,7 @@ def build_time_summary(config: HumanizerConfig, now: datetime | None = None) -> 
     nearby = nearby_dates(config, now)
     if nearby:
         lines.append("- 近期明确日期：" + "；".join(nearby))
-    lines.append("- 对话建议：结合当前时段自然回应午饭、下班、睡前、节假日等话题；不要乱猜纪念日。")
+    lines.append("- 可结合当前时段自然提及作息相关话题，但不要乱猜纪念日或特殊日期。")
     return "\n".join(lines)
 
 
@@ -115,17 +115,17 @@ def build_status_reference(config: HumanizerConfig, now: datetime | None = None)
     now = now or now_in_timezone(config.time_awareness.timezone)
     period = period_name(now.hour)
     if "早晨" in period:
-        status = "刚开始一天，状态还在慢慢进入节奏，适合简短自然地回应。"
+        status = "刚开始一天，状态还在慢慢进入节奏，自然地回应就好。"
     elif "上午" in period:
-        status = "上午在处理日常事项，回复应清楚直接，不主动编造正在做的具体事。"
+        status = "上午在处理日常事项，回复应清楚直接。"
     elif "中午" in period:
         status = "午饭或午休前后，状态偏轻松，适合自然关心对方吃饭和休息。"
     elif "下午" in period:
-        status = "下午在平稳处理日常安排，适合陪伴式聊天，少写场景动作。"
+        status = "下午在平稳处理日常安排，适合陪伴式聊天。"
     elif "晚上" in period:
-        status = "晚上节奏放慢，适合更温柔地回应，但不要扩写成剧情。"
+        status = "晚上节奏放慢，适合更温柔地回应。"
     else:
-        status = "深夜或睡前，应更克制、简短、安稳，不制造新事件。"
+        status = "深夜或睡前，更克制安稳地回应。"
     return f"今日状态参考：{status}"
 
 
@@ -137,7 +137,7 @@ def build_life_schedule_reference(config: HumanizerConfig, now: datetime | None 
     else:
         hour = now.hour
         if 5 <= hour < 8:
-            schedule_text = "清晨：慢慢醒来、整理心情，适合短句问候和轻柔陪伴。"
+            schedule_text = "清晨：慢慢醒来、整理心情，适合问候和轻柔陪伴。"
         elif 8 <= hour < 11:
             schedule_text = "上午：处理日常小事、整理房间或做自己的轻量安排，回复应清楚自然。"
         elif 11 <= hour < 14:
@@ -149,7 +149,7 @@ def build_life_schedule_reference(config: HumanizerConfig, now: datetime | None 
         elif 20 <= hour < 23:
             schedule_text = "晚上：更适合放慢节奏、聊天、休息和稳定陪伴。"
         else:
-            schedule_text = "深夜/睡前：更克制、简短、安稳，不主动制造新事件。"
+            schedule_text = "深夜/睡前：更克制安稳地陪伴，不主动制造新事件。"
 
     lines = [
         "私聊日程参考：",
