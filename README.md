@@ -43,6 +43,15 @@
 
 ---
 
+## 版本历史
+
+### v1.1.0 (2026-07-01)
+
+- **修复**：`_match()` / `_match_from_prompt_messages()` / `_schedule_followup_if_needed()` 中 `session_id` 获取不一致，硬编码使用 `kwargs.get("session_id")` 而 `extract_chat_fields` 支持多 key 查找（`session_id`/`chat_id`/`stream_id`/`conversation_id`）。当 hook 传入的 key 为 `stream_id` 时，缓存写入与查询使用不同取值路径，导致已匹配会话缓存永远无法命中，引发概率性匹配失败。
+- **优化**：`_match()` 复用 `match_target_private_chat` 已提取的 `user_id`/`session_id` 字段，消除重复的 `extract_chat_fields` 调用。
+
+---
+
 ## 功能概述
 
 本插件**只读取自身目录下的 `config.toml`**，不依赖 MaiBot 主配置。核心能力：

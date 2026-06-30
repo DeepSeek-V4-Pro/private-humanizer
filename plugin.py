@@ -44,7 +44,7 @@ class PluginSectionConfig(PluginConfigBase):
     __ui_icon__ = "settings"
     __ui_order__ = 0
 
-    config_version: str = Field(default="1.0.0", title="配置版本", description="供 MaiBot WebUI 识别配置版本，普通用户不要修改。")
+    config_version: str = Field(default="1.1.0", title="配置版本", description="供 MaiBot WebUI 识别配置版本，普通用户不要修改。")
     enabled: bool = Field(default=True, title="启用插件", description="关闭后插件安装但不生效。")
     private_only: bool = Field(default=True, title="只在私聊生效", description="建议开启，避免影响群聊。")
     target_platforms: list[str] = Field(default_factory=lambda: ["qq"], title="生效平台", description="QQ / NapCat 私聊一般填写 qq。")
@@ -250,17 +250,20 @@ class PrivateHumanizerPlugin(MaiBotPlugin):
             self.ctx.logger.debug("Private Humanizer: early reject reason=%s", direct_match.reason)
             return direct_match
 
-        standard_fields = extract_chat_fields(kwargs)
-        if standard_fields.get("user_id"):
+        # 复用 match_target_private_chat 已提取的字段，避免重复调用 extract_chat_fields
+        # 且保证缓存/session_id 与直接匹配时使用相同的提取逻辑
+        extracted_user_id = direct_match.user_id
+        extracted_session_id = direct_match.session_id
+
+        if extracted_user_id:
             self.ctx.logger.debug(
                 "Private Humanizer: user_id=%s present but not matched (reason=%s)",
-                standard_fields.get("user_id"), direct_match.reason,
+                extracted_user_id, direct_match.reason,
             )
             return direct_match
 
-        session_id = str(kwargs.get("session_id") or "").strip()
-        if session_id and session_id in self._matched_sessions():
-            self.ctx.logger.info("Private Humanizer: matched via cached session=%s", session_id)
+        if extracted_session_id and extracted_session_id in self._matched_sessions():
+            self.ctx.logger.info("Private Humanizer: matched via cached session=%s", extracted_session_id)
             profile = active_config.target_profiles[0] if active_config.target_profiles else None
             if profile is None and active_config.plugin.target_user_ids:
                 profile = TargetProfile(
@@ -276,7 +279,7 @@ class PrivateHumanizerPlugin(MaiBotPlugin):
                 reason="known matched session",
                 platform=profile.platform,
                 user_id=profile.user_id,
-                session_id=session_id,
+                session_id=extracted_session_id,
                 chat_type="private",
             )
 
@@ -336,7 +339,8 @@ class PrivateHumanizerPlugin(MaiBotPlugin):
                 self.ctx.logger.info("Private Humanizer: group signal detected in prompt, skipping")
                 return MatchResult(False, reason="group prompt detected")
 
-        session_id = str(kwargs.get("session_id") or "").strip()
+        fields = extract_chat_fields(kwargs)
+        session_id = fields.get("session_id", "")
         candidates_list: list[str] = []
         for profile in config.target_profiles:
             candidates = {profile.user_id.strip(), profile.display_name.strip(), profile.profile_id.strip()}
@@ -575,7 +579,7 @@ class PrivateHumanizerPlugin(MaiBotPlugin):
         followup = config.proactive_followup
         if not followup.enabled:
             return
-        session_id = str(match.session_id or kwargs.get("session_id") or "").strip()
+        session_id = str(match.session_id or extract_chat_fields(kwargs).get("session_id") or "").strip()
         if not session_id:
             return
         if len((response_text or "").strip()) < followup.min_reply_chars:

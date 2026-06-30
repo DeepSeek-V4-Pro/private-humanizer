@@ -1,5 +1,5 @@
 [plugin]
-config_version = "1.0.0"
+config_version = "1.1.0"
 enabled = true
 private_only = true
 target_platforms = ["qq"]
@@ -11,6 +11,11 @@ enabled = true
 timezone = "Asia/Shanghai"
 holiday_region = "CN"
 custom_dates_enabled = true
+
+[[time_awareness.custom_dates]]
+name = ""
+date = ""
+description = ""
 
 [schedule]
 enabled = true
@@ -41,7 +46,7 @@ inject_into_private_prompt = true
 require_evidence_for_preferences = true
 
 [[target_profiles]]
-profile_id = "target"
+profile_id = ""
 platform = "qq"
 user_id = ""
 session_id = ""
@@ -56,8 +61,8 @@ fact_guard_enabled = true
 anniversary_guard_enabled = true
 style_guard_enabled = true
 memory_guard_enabled = true
-max_reply_chars_soft = 80
-max_reply_chars_hard = 160
+max_reply_chars_soft = 400
+max_reply_chars_hard = 800
 
 [proactive_followup]
 enabled = true
