@@ -72,7 +72,7 @@ description = "用户明确确认过的相识日"
 [schedule]
 enabled = true
 generation_mode = "daily"
-inject_into_planner = true
+inject_into_planner = false
 inject_into_replyer = true
 allow_manual_override = true
 manual_status = ""
@@ -94,8 +94,8 @@ fact_guard_enabled = true
 anniversary_guard_enabled = true
 style_guard_enabled = true
 memory_guard_enabled = true
-max_reply_chars_soft = 80
-max_reply_chars_hard = 160
+max_reply_chars_soft = 400
+max_reply_chars_hard = 800
 ```
 
 - `fact_guard_enabled`：阻止“你最爱”“我记得你”“我给你准备了”等无证据事实。
@@ -109,7 +109,7 @@ max_reply_chars_hard = 160
 [logging]
 enabled = true
 log_level = "info"
-save_rewrite_pairs = true
+save_rewrite_pairs = false
 ```
 
-`save_rewrite_pairs = true` 时会保存原回复和改写结果，便于调试。如果担心日志包含隐私内容，可以设为 `false` 或关闭 `enabled`。
+`save_rewrite_pairs = true` 时会保存原回复和改写结果，便于调试。默认关闭以保护隐私，排查问题时可临时开启，排查结束后务必关回 `false`。

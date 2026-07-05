@@ -75,4 +75,4 @@ intent = "这是私聊增强插件发起的主动续话检查。请回看刚才�
 [logging]
 enabled = true
 log_level = "info"
-save_rewrite_pairs = true
+save_rewrite_pairs = false
