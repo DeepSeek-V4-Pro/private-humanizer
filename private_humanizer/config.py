@@ -44,7 +44,7 @@ class ScheduleSection:
     enabled: bool = True
     generation_mode: str = "daily"
     refresh_hours: list[int] = field(default_factory=lambda: [7, 12, 18, 22])
-    inject_into_planner: bool = False
+    inject_into_planner: bool = True
     inject_into_replyer: bool = True
     allow_manual_override: bool = True
     manual_status: str = ""

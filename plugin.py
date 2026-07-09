@@ -22,7 +22,7 @@ from private_humanizer.audit import write_audit
 from private_humanizer.config import DEFAULT_FOLLOWUP_INTENT, HumanizerConfig, TargetProfile, load_config
 from private_humanizer.context import MatchResult, extract_chat_fields, match_target_private_chat
 from private_humanizer.guards import guard_memory_items, guard_reply_text, is_intimate_context
-from private_humanizer.prompting import append_extra_prompt, build_humanizer_prompt
+from private_humanizer.prompting import append_extra_prompt, build_humanizer_prompt, build_planner_prompt
 
 
 PROMPT_MARKER = "[Private Humanizer 私聊增强约束]"
@@ -44,7 +44,7 @@ class PluginSectionConfig(PluginConfigBase):
     __ui_icon__ = "settings"
     __ui_order__ = 0
 
-    config_version: str = Field(default="1.3.0", title="配置版本", description="供 MaiBot WebUI 识别配置版本，普通用户不要修改。")
+    config_version: str = Field(default="1.4.0", title="配置版本", description="供 MaiBot WebUI 识别配置版本，普通用户不要修改。")
     enabled: bool = Field(default=True, title="启用插件", description="关闭后插件安装但不生效。")
     private_only: bool = Field(default=True, title="只在私聊生效", description="建议开启，避免影响群聊。")
     target_platforms: list[str] = Field(default_factory=lambda: ["qq"], title="生效平台", description="QQ / NapCat 私聊一般填写 qq。")
@@ -76,7 +76,7 @@ class ScheduleConfig(PluginConfigBase):
     enabled: bool = Field(default=True, title="启用日程参考", description="让 MaiBot 根据当前时段更像真的在生活，但日程不是事实。")
     generation_mode: str = Field(default="daily", title="生成模式", description="保留 daily 即可。")
     refresh_hours: list[int] = Field(default_factory=lambda: [7, 12, 18, 22], title="状态刷新小时", description="用于区分早晨、中午、傍晚、睡前。")
-    inject_into_planner: bool = Field(default=False, title="注入 Planner", description="建议关闭；长私聊中 Planner payload 可能较大。")
+    inject_into_planner: bool = Field(default=True, title="注入 Planner", description="开启后向规划器注入私聊画像和约束，避免系统优先调用默认人设。")
     inject_into_replyer: bool = Field(default=True, title="注入 Replyer", description="建议开启，让最终回复遵守私聊增强约束。")
     allow_manual_override: bool = Field(default=True, title="允许手动今日状态", description="开启后 manual_status 非空时优先使用。")
     manual_status: str = Field(default="", title="手动今日状态", description="可留空。填写后作为今日状态参考，不是已发生事实。")
@@ -510,22 +510,27 @@ class PrivateHumanizerPlugin(MaiBotPlugin):
                     return value
         return None
 
+    @HookHandler(
+        "maisaka.planner.before_request",
+        name="private_humanizer_planner_prompt",
+        description="向 Planner 的 messages 注入私聊画像和关键约束，让 LLM 在规划阶段即参考配置信息。",
+        mode=HookMode.BLOCKING,
+        order=HookOrder.EARLY,
+        error_policy=ErrorPolicy.SKIP,
+    )
     async def inject_planner_prompt(self, **kwargs):
-        """Optional helper for planner prompt injection (not registered as a hook by default).
-
-        The active injection path is replyer.before_model_request via the
-        inject_replyer_model_prompt hook. This method is kept for advanced use cases
-        where a user manually registers it as a planner hook.
-        """
         config = self._config()
         if not config.schedule.inject_into_planner:
             return self._continue()
 
         match = self._match(kwargs, config)
         if not match.matched:
+            self.ctx.logger.debug("Private Humanizer: inject_planner_prompt not matched, skipping")
             return self._continue()
 
-        prompt = build_humanizer_prompt(config, match.profile)
+        self.ctx.logger.info("Private Humanizer: inject_planner_prompt matched (session=%s)", match.session_id)
+
+        prompt = build_planner_prompt(config, match.profile)
         messages = self._inject_prompt_into_messages(self._find_messages(kwargs), prompt)
         if messages is None:
             return self._continue()

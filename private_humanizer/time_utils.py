@@ -93,76 +93,60 @@ def nearby_dates(config: HumanizerConfig, now: datetime) -> list[str]:
 
 def build_time_summary(config: HumanizerConfig, now: datetime | None = None) -> str:
     now = now or now_in_timezone(config.time_awareness.timezone)
-    tomorrow = now + timedelta(days=1)
-    lines = [
-        "当前时间信息：",
-        f"- 日期：{now:%Y-%m-%d}，{WEEKDAYS_CN[now.weekday()]}",
-        f"- 当前时段：{period_name(now.hour)}",
-        f"- 明天：{tomorrow:%Y-%m-%d}，{WEEKDAYS_CN[tomorrow.weekday()]}",
+    parts = [
+        f"当前时间：{now:%Y-%m-%d} {WEEKDAYS_CN[now.weekday()]}，{period_name(now.hour)}",
     ]
     nearby = nearby_dates(config, now)
     if nearby:
-        lines.append("- 近期明确日期：" + "；".join(nearby))
-    lines.append("- 可结合当前时段自然提及作息相关话题，但不要乱猜纪念日或特殊日期。")
-    return "\n".join(lines)
+        parts.append("节日：" + "；".join(nearby))
+    parts.append("可结合时段自然提及作息，不猜纪念日。")
+    return "\n".join(parts)
 
 
 def build_status_reference(config: HumanizerConfig, now: datetime | None = None) -> str:
     if config.schedule.manual_status and config.schedule.allow_manual_override:
-        status = config.schedule.manual_status.strip()
-        return f"今日状态参考：{status}" if not status.startswith("今日状态参考") else status
+        return config.schedule.manual_status.strip()
 
     now = now or now_in_timezone(config.time_awareness.timezone)
+    status_map = {
+        "早晨": "清晨，状态慢慢进入节奏",
+        "上午": "上午，处理日常事务中",
+        "中午": "午间，偏轻松",
+        "下午": "下午，平稳陪伴中",
+        "晚上": "晚上，节奏放慢",
+    }
     period = period_name(now.hour)
-    if "早晨" in period:
-        status = "刚开始一天，状态还在慢慢进入节奏，自然地回应就好。"
-    elif "上午" in period:
-        status = "上午在处理日常事项，回复应清楚直接。"
-    elif "中午" in period:
-        status = "午饭或午休前后，状态偏轻松，适合自然关心对方吃饭和休息。"
-    elif "下午" in period:
-        status = "下午在平稳处理日常安排，适合陪伴式聊天。"
-    elif "晚上" in period:
-        status = "晚上节奏放慢，适合更温柔地回应。"
-    else:
-        status = "深夜或睡前，更克制安稳地回应。"
-    return f"今日状态参考：{status}"
+    status = "深夜，更克制安稳"
+    for key, val in status_map.items():
+        if key in period:
+            status = val
+            break
+    return f"状态：{status}"
 
 
 def build_life_schedule_reference(config: HumanizerConfig, now: datetime | None = None) -> str:
     now = now or now_in_timezone(config.time_awareness.timezone)
     manual = config.schedule.manual_schedule.strip()
     if manual:
-        schedule_text = manual
-    else:
-        hour = now.hour
-        if 5 <= hour < 8:
-            schedule_text = "清晨：慢慢醒来、整理心情，适合问候和轻柔陪伴。"
-        elif 8 <= hour < 11:
-            schedule_text = "上午：处理日常小事、整理房间或做自己的轻量安排，回复应清楚自然。"
-        elif 11 <= hour < 14:
-            schedule_text = "中午：准备午饭、吃饭或午休前后，适合自然关心吃饭和休息。"
-        elif 14 <= hour < 17:
-            schedule_text = "下午：安静做事、看书、整理东西或短暂休息，适合陪伴式闲聊。"
-        elif 17 <= hour < 20:
-            schedule_text = "傍晚：节奏放松，可能准备晚饭或从白天安排里收尾，适合温柔接话。"
-        elif 20 <= hour < 23:
-            schedule_text = "晚上：更适合放慢节奏、聊天、休息和稳定陪伴。"
-        else:
-            schedule_text = "深夜/睡前：更克制安稳地陪伴，不主动制造新事件。"
+        return f"私聊日程参考：{manual}"
+
+    hour = now.hour
+    schedule_map = {
+        (5, 8): "清晨，适合轻柔陪伴",
+        (8, 11): "上午，处理日常中",
+        (11, 14): "午间，可关心吃饭休息",
+        (14, 17): "下午，陪伴式闲聊",
+        (17, 20): "傍晚，节奏放松",
+        (20, 23): "晚上，聊天和陪伴",
+    }
+    schedule_text = "深夜，克制安稳"
+    for (lo, hi), text in schedule_map.items():
+        if lo <= hour < hi:
+            schedule_text = text
+            break
 
     lines = [
-        "私聊日程参考：",
-        schedule_text,
-        "日程使用规则：这只是当前时段的行为候选和语气参考，不是已发生事实；不要主动宣称自己刚刚完成了某个具体事项。可用「刚忙完手头的事」这类模糊表达代替具体行动描述。",
-        "每天的表达应有变化，避免固定句式（如每天都说「刚整理完房间」）；可根据用户当天话题微调语气。",
+        f"日程：{schedule_text}",
+        "注意：仅作语气参考，不是事实。用户指示优先于日程。",
     ]
-    if config.schedule.allow_user_interrupt:
-        lines.append(
-            "如果用户在聊天中让 MaiBot 做其他事情、改变场景或推进新的互动，请根据人设、关系和当前提示词判断是否自然打断当前日程；通常应优先承接用户指示，并把新指示作为接下来的当前状态参考。"
-        )
-    else:
-        lines.append("如果用户指示与日程冲突，请先简短确认，再谨慎承接。")
-    if config.schedule.reference_only:
-        lines.append("不要把日程写成固定剧本，不要为了贴合日程而忽略用户刚说的话。")
     return "\n".join(lines)

@@ -1,5 +1,5 @@
 [plugin]
-config_version = "1.3.0"
+config_version = "1.4.0"
 enabled = true
 private_only = true
 target_platforms = ["qq"]
@@ -26,7 +26,7 @@ refresh_hours = [
     18,
     22,
 ]
-inject_into_planner = false
+inject_into_planner = true
 inject_into_replyer = true
 allow_manual_override = true
 manual_status = ""
