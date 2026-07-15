@@ -255,6 +255,15 @@ class PrivateHumanizerPlugin(MaiBotPlugin):
         extracted_user_id = direct_match.user_id
         extracted_session_id = direct_match.session_id
 
+        # 当 chat_type 和 group_id 均无法获取时，不做降级匹配（如 planner.before_request
+        # 的 kwargs 可能不含 chat_type/group_id），防止画像泄露到群聊等非私聊会话。
+        if not direct_match.chat_type and not direct_match.group_id:
+            self.ctx.logger.debug(
+                "Private Humanizer: no chat_type/group_id, skip fallback (user=%s, session=%s)",
+                extracted_user_id, extracted_session_id,
+            )
+            return direct_match
+
         if extracted_user_id:
             self.ctx.logger.debug(
                 "Private Humanizer: user_id=%s present but not matched (reason=%s)",
