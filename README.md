@@ -27,7 +27,7 @@
 
 ## 📌 版本兼容性
 
-- **理论兼容版本**：MaiBot **1.0.0 ~ 1.99.99**（当前版本插件v1.5.0）
+- **理论兼容版本**：MaiBot **1.0.0 ~ 1.99.99**（当前插件版本v1.5.0）
 - **≥1.0.8 注意事项**：MaiBot 核心 `hook_dispatcher` 的 kwargs 替换逻辑变更（`= dict(...)` 完全替换而非合并 `update`），导致多插件共用同一 Hook 点时后注册的插件拿不到 `session_id` 等关键参数。本插件 v1.2.0 起内置三级 session_id 捕获机制（消息接收 → before_request → before_model_request）和 `extract_chat_fields` 额外搜索路径，在 kwargs 被替换后仍可恢复会话 ID。
 - **MaiBot ≥1.0.8 理论适配**：注入路径重构，移除对 `extra_prompt` 注入的依赖，Hook 顺序从 `LATE` 调整为 `NORMAL`，新增多 key 命名兜底的消息查找方法 `_find_messages`。
 
