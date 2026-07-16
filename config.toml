@@ -1,5 +1,5 @@
 [plugin]
-config_version = "1.4.0"
+config_version = "1.5.0"
 enabled = true
 private_only = true
 target_platforms = ["qq"]

@@ -51,7 +51,7 @@ def extract_chat_fields(kwargs: dict[str, Any]) -> dict[str, str]:
                     return str(value).strip()
         return ""
 
-    chat_type = first("chat_type", "message_type", "conversation_type", "scope", "type")
+    chat_type = first("chat_type", "message_type", "conversation_type")
     return {
         "platform": first("platform", "adapter", "platform_name"),
         "user_id": first("user_id", "sender_id", "from_user_id", "person_id", "target_user_id"),

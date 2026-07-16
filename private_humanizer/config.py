@@ -219,7 +219,7 @@ def load_config(raw: dict[str, Any] | None) -> HumanizerConfig:
             enabled=bool(schedule.get("enabled", True)),
             generation_mode=str(schedule.get("generation_mode", "daily")).strip() or "daily",
             refresh_hours=_int_list(schedule.get("refresh_hours", [7, 12, 18, 22]), [7, 12, 18, 22]),
-            inject_into_planner=bool(schedule.get("inject_into_planner", False)),
+            inject_into_planner=bool(schedule.get("inject_into_planner", True)),
             inject_into_replyer=bool(schedule.get("inject_into_replyer", True)),
             allow_manual_override=bool(schedule.get("allow_manual_override", True)),
             manual_status=str(schedule.get("manual_status", "")).strip(),

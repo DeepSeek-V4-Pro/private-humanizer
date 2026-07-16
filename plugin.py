@@ -44,7 +44,7 @@ class PluginSectionConfig(PluginConfigBase):
     __ui_icon__ = "settings"
     __ui_order__ = 0
 
-    config_version: str = Field(default="1.4.0", title="配置版本", description="供 MaiBot WebUI 识别配置版本，普通用户不要修改。")
+    config_version: str = Field(default="1.5.0", title="配置版本", description="供 MaiBot WebUI 识别配置版本，普通用户不要修改。")
     enabled: bool = Field(default=True, title="启用插件", description="关闭后插件安装但不生效。")
     private_only: bool = Field(default=True, title="只在私聊生效", description="建议开启，避免影响群聊。")
     target_platforms: list[str] = Field(default_factory=lambda: ["qq"], title="生效平台", description="QQ / NapCat 私聊一般填写 qq。")
@@ -254,15 +254,6 @@ class PrivateHumanizerPlugin(MaiBotPlugin):
         # 且保证缓存/session_id 与直接匹配时使用相同的提取逻辑
         extracted_user_id = direct_match.user_id
         extracted_session_id = direct_match.session_id
-
-        # 当 chat_type 和 group_id 均无法获取时，不做降级匹配（如 planner.before_request
-        # 的 kwargs 可能不含 chat_type/group_id），防止画像泄露到群聊等非私聊会话。
-        if not direct_match.chat_type and not direct_match.group_id:
-            self.ctx.logger.debug(
-                "Private Humanizer: no chat_type/group_id, skip fallback (user=%s, session=%s)",
-                extracted_user_id, extracted_session_id,
-            )
-            return direct_match
 
         if extracted_user_id:
             self.ctx.logger.debug(
@@ -530,6 +521,18 @@ class PrivateHumanizerPlugin(MaiBotPlugin):
     async def inject_planner_prompt(self, **kwargs):
         config = self._config()
         if not config.schedule.inject_into_planner:
+            return self._continue()
+
+        # 只在已被 Replyer 确认过私聊的会话中注入，防止群聊泄漏。
+        # 首次交互时 Planner 先于 Replyer 运行，cache 为空，跳过注入；
+        # 后续消息中 Replyer 已缓存该 session，注入可信。
+        fields = extract_chat_fields(kwargs)
+        session_id = fields.get("session_id", "")
+        if not session_id or session_id not in self._matched_sessions():
+            self.ctx.logger.debug(
+                "Private Humanizer: session not yet confirmed as private (session=%s), skip planner injection",
+                session_id,
+            )
             return self._continue()
 
         match = self._match(kwargs, config)

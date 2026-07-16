@@ -1,9 +1,9 @@
 {
   "manifest_version": 2,
   "id": "deepseek-v4-pro.private-humanizer",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "name": "麦麦私聊拟人化增强（深度优化版）",
-  "description": "私聊拟人化增强 v1.4.0：Planner+Replyer 双阶段提示词注入，时间感知、画像注入、回复守卫、记忆守卫、主动续话。提示词全面精简优化。",
+  "description": "私聊拟人化增强 v1.5.0：Planner+Replyer 双阶段提示词注入，时间感知、画像注入、回复守卫、记忆守卫、主动续话。提示词全面精简优化。",
   "author": {
     "name": "DeepSeek-V4",
     "url": "https://github.com/DeepSeek-V4-Pro"

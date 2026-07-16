@@ -67,7 +67,7 @@ def _life_environment_prompt(config: HumanizerConfig, profile: TargetProfile | N
     name = profile.display_name or profile.profile_id or profile.user_id or "目标用户" if profile else "目标用户"
     return (
         f"生活环境：LLM 根据人设与 {name} 的关系自动生成简洁日常环境"
-        "（家/房间/书桌等），保持稳定，不宣告细节，用户定义新环境时优先承接。"
+        "（家/房间/书桌等）。仅为虚构背景参考，不宣告细节，用户定义新环境时优先承接。"
     )
 
 

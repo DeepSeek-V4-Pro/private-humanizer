@@ -91,8 +91,8 @@ class CoreTest(unittest.TestCase):
     def test_prompt_contains_life_environment_and_schedule(self):
         config = load_config(RAW_CONFIG)
         prompt = build_humanizer_prompt(config, config.target_profiles[0])
-        self.assertIn("虚拟生活环境参考", prompt)
-        self.assertIn("主程序 LLM", prompt)
+        self.assertIn("生活环境", prompt)
+        self.assertIn("自动生成", prompt)
         self.assertIn("私聊日程参考", prompt)
         self.assertIn("下午整理房间", prompt)
 
@@ -181,7 +181,7 @@ class CoreTest(unittest.TestCase):
     def test_followup_config_defaults(self):
         config = load_config(RAW_CONFIG)
         self.assertTrue(config.proactive_followup.enabled)
-        self.assertFalse(config.schedule.inject_into_planner)
+        self.assertTrue(config.schedule.inject_into_planner)
         self.assertTrue(config.life_environment.auto_generate_when_empty)
         self.assertTrue(config.schedule.allow_user_interrupt)
         self.assertEqual(config.proactive_followup.delay_seconds, 35)

@@ -166,7 +166,7 @@ def has_verified_evidence(text: str, profile: TargetProfile | None) -> bool:
     evidence_candidates = {
         candidate
         for candidate in fragments
-        if len(candidate) >= 2 and candidate not in EVIDENCE_STOP_WORDS
+        if len(candidate) >= 3 and candidate not in EVIDENCE_STOP_WORDS
     }
     return any(candidate in compact_text for candidate in evidence_candidates)
 
