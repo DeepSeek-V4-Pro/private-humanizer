@@ -19,7 +19,7 @@
 9. **提示词注入会增加每次 LLM 请求的 token 消耗**。完整约束块（时间、状态、日程、环境、画像、事实边界、亲密规则、风格规则、情绪规则）总计约 1500-3000 个中文字符，加上 `extra_prompt` 和 `messages` 两条路径同时注入，实际 token 开销取决于所用模型的 tokenizer。如果对 token 成本敏感，可关闭不用的功能段（如 `life_environment.enabled`、`schedule.enabled`）来减小提示词体积。
 10. 本插件**必须配置至少一个 `target_user_ids` 或 `[[target_profiles]].user_id` 才能生效**。默认 `config.toml` 中这两个字段均为空，插件不会匹配任何用户，不会产生任何效果，也不会消耗 token。
 11. 配置 `inject_into_planner = true` 时，提示词会注入到 Planner 阶段，Payload 较 replyer 注入更小（精简版），但仍会略微增加 token 消耗。如不需要可在 `[schedule]` 中关闭。
-12. **记忆守卫仅拦截 `expression.learn.before_upsert` Hook 路径**，不拦截 MaiBot 其他记忆写入路径（如手动添加、数据库直接写入等）。如果 MaiBot 启用了其他记忆插件或自定义记忆逻辑，本插件的记忆守卫可能无法覆盖。
+12. **记忆守卫拦截 `expression.learn.after_extract`（候选过滤）与 `expression.learn.before_upsert`（写入前中止）两条 Hook 路径**，不拦截 MaiBot 其他记忆写入路径（如手动添加、数据库直接写入等）。如果 MaiBot 启用了其他记忆插件或自定义记忆逻辑，本插件的记忆守卫可能无法覆盖。
 13. 本插件只读取自身目录下的 `config.toml`，不修改 MaiBot 主配置文件、数据库或系统文件。插件运行时会读取配置并在内存中维护匹配缓存和续话历史，卸载或配置更新时自动清理。
 14. 使用者应自行评估功能对聊天体验的影响，**作者不对因使用本插件产生的任何后果承担责任**，包括但不限于：回复质量下降、误拦截关键信息、亲密场景话题跳转未被阻止、主动续话造成打扰、token 成本增加、日志文件占用磁盘空间等。
 
@@ -27,8 +27,9 @@
 
 ## 📌 版本兼容性
 
-- **理论兼容版本**：MaiBot **1.0.0 ~ 1.99.99**（当前插件版本v1.5.0）
+- **理论兼容版本**：MaiBot **1.0.0 ~ 1.99.99**（当前插件版本 v1.6.0）
 - **≥1.0.8 注意事项**：MaiBot 核心 `hook_dispatcher` 的 kwargs 替换逻辑变更（`= dict(...)` 完全替换而非合并 `update`），导致多插件共用同一 Hook 点时后注册的插件拿不到 `session_id` 等关键参数。本插件 v1.2.0 起内置三级 session_id 捕获机制（消息接收 → before_request → before_model_request）和 `extract_chat_fields` 额外搜索路径，在 kwargs 被替换后仍可恢复会话 ID。
+- **v1.6.0 增强**：所有注入/改写返回都会**合并保留原始 kwargs 全键**，从源头避免同 hook 的后续处理器（含其他插件）丢失 `session_id` / `tool_definitions` / `reply_tool_args`；同时新增群聊硬拦截（会话 ID 形态 + receive 确认/去毒），详见 [CHANGELOG.md](CHANGELOG.md)。
 - **MaiBot ≥1.0.8 理论适配**：注入路径重构，移除对 `extra_prompt` 注入的依赖，Hook 顺序从 `LATE` 调整为 `NORMAL`，新增多 key 命名兜底的消息查找方法 `_find_messages`。
 
 ---
@@ -48,17 +49,6 @@
 | **配置修复** | `config.toml` 重置为代码默认值；`cooldown_seconds` 默认统一为 180 秒 |
 | **确定性** | `_intimate_bridge_fallback` 用 `hashlib.sha256` 取代 `hash() ^ id()`，确保同输入可重现 |
 | **测试适配** | `test_memory_guard_handles_dict_items` 适配 dict key 不再检查的逻辑 |
-
----
-
-## 版本历史
-
-### v1.1.0 (2026-07-01)
-
-- **修复**：`_match()` / `_match_from_prompt_messages()` / `_schedule_followup_if_needed()` 中 `session_id` 获取不一致，硬编码使用 `kwargs.get("session_id")` 而 `extract_chat_fields` 支持多 key 查找（`session_id`/`chat_id`/`stream_id`/`conversation_id`）。当 hook 传入的 key 为 `stream_id` 时，缓存写入与查询使用不同取值路径，导致已匹配会话缓存永远无法命中，引发概率性匹配失败。
-- **优化**：`_match()` 复用 `match_target_private_chat` 已提取的 `user_id`/`session_id` 字段，消除重复的 `extract_chat_fields` 调用。
-
----
 
 ## 功能概述
 
@@ -114,7 +104,7 @@ relationship_notes = "不要编造未确认的偏好、礼物、纪念日或共�
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `config_version` | str | `"1.5.0"` | 配置版本号，由插件管理，请勿手动修改 |
+| `config_version` | str | `"1.6.0"` | 配置版本号，由插件管理，请勿手动修改 |
 | `enabled` | bool | `true` | 插件开关 |
 | `private_only` | bool | `true` | 仅私聊生效，建议保持开启 |
 | `target_platforms` | list | `["qq"]` | 生效平台，QQ 填写 `"qq"` |
@@ -213,14 +203,15 @@ relationship_notes = "不要编造未确认的偏好、礼物、纪念日或共�
 
 | Hook 点 | 方法 | 时机 | 行为 |
 |---------|------|------|------|
-| `chat.receive.after_process` | `capture_receive` | 消息接收后（EARLY） | [1/3] 捕获 session_id |
+| `chat.receive.after_process` | `capture_receive` | 消息接收后（EARLY） | [1/3] 捕获 session_id，按 `message_info` 确认目标私聊 / 群聊去毒 |
 | `maisaka.replyer.before_request` | `capture_before_request` | 回复请求前（EARLY） | [2/3] 捕获 session_id |
 | `maisaka.replyer.before_model_request` | `capture_before_model` | 模型调用前（EARLY） | [3/3] 捕获 session_id |
 | `maisaka.planner.before_request` | `inject_planner_prompt` | 规划器请求前（EARLY） | 注入精简版私聊画像和约束 |
 | `maisaka.replyer.before_request` | `inject_replyer_prompt` | 回复请求前（NORMAL） | 匹配和跟踪私聊会话 |
 | `maisaka.replyer.before_model_request` | `inject_replyer_model_prompt` | 模型调用前（NORMAL） | 注入完整私聊增强约束 |
 | `maisaka.replyer.after_response` | `guard_reply` | 回复生成后（NORMAL） | 规则守卫 + 调度主动续话 |
-| `expression.learn.before_upsert` | `guard_expression_memory` | 表达学习写入前（EARLY） | 拦截可疑个人事实 |
+| `expression.learn.after_extract` | `filter_extracted_memory` | 表达候选解析后（EARLY） | 过滤包含可疑个人事实的表达候选 |
+| `expression.learn.before_upsert` | `guard_expression_memory` | 表达学习写入前（EARLY） | 拦截 situation/style 中的可疑个人事实并中止写入 |
 
 所有 Hook 均为 `BLOCKING` 模式，出错策略为 `SKIP`（出错时不阻塞主流程）。
 
@@ -228,13 +219,13 @@ relationship_notes = "不要编造未确认的偏好、礼物、纪念日或共�
 
 ## 主动续话工作原理
 
-1. 每次守卫检查通过后，`_schedule_followup_if_needed` 判断是否满足条件：
+1. 每次守卫检查通过后，`FollowupManager.schedule_if_needed` 判断是否满足条件：
    - 开启且满足最短回复长度
    - 无重试（`retry_count == 0`）
    - 没有该会话的进行中续话任务
    - 未触及每小时上限和冷却
 2. 满足条件时创建异步 Task，延迟 `delay_seconds` 秒后执行。
-3. 延迟期间检测上下文是否为亲密场景，选择普通续话意图或亲密续话意图。
+3. 延迟期间检测上下文（含 before_model_request 阶段缓存的最近用户发言快照）是否为亲密场景，选择普通续话意图或亲密续话意图。
 4. 调用 `ctx.maisaka.proactive.trigger()`，由 Maisaka 自行判断是否真正发送。
 5. 发送成功后记录时间戳到冷却历史。
 
@@ -244,18 +235,21 @@ relationship_notes = "不要编造未确认的偏好、礼物、纪念日或共�
 
 ## 匹配策略
 
-插件采用三级匹配降级策略：
+插件采用“群聊硬拦截 + 确认缓存优先 + 兜底受限”的匹配策略：
 
 | 优先级 | 策略 | 说明 |
 |--------|------|------|
-| 1 | 标准字段匹配 | 检查 Hook 传入的 `user_id`、`session_id`、`platform`、`chat_type` |
-| 2 | 缓存会话匹配 | 之前成功匹配过的 `session_id` 直接命中 |
-| 3 | Prompt 文本匹配 | 扫描 messages 内容中是否出现画像的 `display_name`、`user_id` 或 `profile_id` |
+| 0 | 群聊硬拦截 | `qq_group_*` / `group_*` 等群形态会话 ID、显式 `group_id` 或 `chat_type=group` 直接拒绝，并清除该会话的历史匹配缓存（去毒） |
+| 1 | 标准字段匹配 | `user_id` / `session_id` / `platform` 与目标配置匹配；私聊形态会话 ID 内嵌目标 QQ（如 `qq_private_3130274394`）时无需 user_id 也可直接命中 |
+| 2 | 确认缓存匹配 | receive 阶段已确认的目标私聊会话，后续只有 session_id 的 hook 直接命中 |
+| 3 | Prompt 文本兜底 | **仅限明确私聊形态会话**；扫描 messages 中是否出现画像的 `display_name` / `user_id`（占位 `profile_id="target"` 除外） |
 
 匹配时还会检查：
+- **会话 ID 形态**：`qq_group_*` / `group_*` 判定为群，`qq_private_*` / `private_*` / `dm_*` 判定为私聊；这是模型请求阶段（只有 session_id）最可靠的判定依据。
+- **receive 阶段确认**：入站消息按 `message_info.group_info` 区分群/私聊；目标用户私聊写入确认缓存，群消息清除匹配缓存。
 - **群聊过滤**：`private_only = true` 时拒绝 group/guild/channel 及含 `group_id` 的消息。
 - **平台过滤**：`target_platforms` 非空时拒绝不在列表中的平台。
-- **Prompt 群信号检测**：第 3 级匹配前先扫描 prompt 中是否包含群聊特征关键词。
+- **Prompt 群信号检测**：提示词兜底前扫描文本中的群聊特征关键词，作为会话 ID 之外的二次防线。
 
 ---
 
@@ -359,54 +353,10 @@ target_user_ids = ["123456789", "987654321"]
 python -m unittest discover -s tests
 ```
 
-当前覆盖：配置加载、私聊匹配、守卫逻辑（事实/纪念日/风格/记忆/亲密话题转移）、提示词构建。
+当前覆盖：配置加载（含字符串布尔解析）、私聊匹配（含群聊硬拦截 / 缓存去毒 / 会话 ID 形态识别）、守卫逻辑（事实/纪念日/风格/记忆/亲密话题转移）、上下文快照与提示词构建。
 
 ---
 
 ## 更新日志
 
-### v1.5.0 (2026-07-16)
-
-**Planner 群聊泄漏修复 + 匹配稳定性增强（3 项）**
-
-- **修复 Planner 提示词泄漏到群聊**：Planner kwargs 天然缺少 `chat_type`/`group_id`，导致 `_is_private` 默认回退为私聊、user_id 匹配穿透到群聊。改为依赖 `_matched_sessions` 缓存——只有被 Replyer 阶段确认过的私聊 session 才注入 Planner 提示词，群聊 session 永远不会进入缓存，彻底阻断泄漏。
-- **修复 `extract_chat_fields` 误判消息 `type` 为聊天类型**：`"scope"` 和 `"type"` 从 chat_type 搜索键中移除（过于通用，消息中的 `type: "text"` 导致 `_is_private` 错误拒绝私聊，使整个插件失效）。
-- **阶段提示词隔离**：`_inject_prompt_into_messages` 注入新提示词时不再清除已存在的其他阶段 Marker（Planner 与 Replyer 提示词共存，各自 Marker 不同，互不覆盖）。
-
-### v1.4.0 (2026-07-10)
-
-**Planner 注入 + 回复器提示词全面精简（6 项）**
-
-- **新增 Planner 阶段注入**：注册 `maisaka.planner.before_request` Hook，在规划器阶段注入精简版私聊画像和关键约束，避免系统优先调用默认人设而忽略插件配置
-- **修复 Marker 碰撞**：Planner 与 Replyer 使用不同的 Prompt Marker，防止 Planner 注入后 Replyer 误判为已注入而跳过
-- **精简 Planner 提示词**：时间、画像、约束信息压缩为 3-5 行紧凑格式，降低 token 开销
-- **回复器提示词全面精简**：`FACT_BOUNDARY` 从 25 行缩至 5 行，`INTIMATE_CONTEXT_RULES` 从 16 行缩至 6 行，`REPLY_STYLE_RULES` 从 15 行缩至 4 行，`EMOTIONAL_PACING_RULES` 从 16 行缩至 4 行
-- **时间工具输出压缩**：`build_time_summary` 缩至 2-3 行，`build_status_reference` 缩为单行，`build_life_schedule_reference` 缩至 2 行 + 合并说明规则
-- **画像和环境注入精简**：`_profile_prompt` 移除冗余说明行，`_life_environment_prompt` 自动生成模式从 5 行缩至 1 行
-
-### v1.3.0 (2026-07-03)
-
-**MaiBot 1.0.10 兼容性修复与注入机制重构（5 项）**
-
-- **注入路径重构**：移除 `inject_replyer_prompt` 的 `extra_prompt` 注入，改为仅做会话匹配跟踪；`inject_replyer_model_prompt` 作为唯一注入点，同时尝试 `modified_kwargs` 返回和原地修改消息列表两种方式，确保在 MaiBot 1.0.10 的 kwargs 传递机制下约束文本仍能到达模型
-- **新增 `_find_messages()` 方法**：多 key 命名兜底（`messages` / `message_list` / `conversation_messages` 等）+ 全 kwargs 内容检测，兼容 MaiBot 未来可能的 kwargs key 变更
-- **Hook 顺序调整**：全部回复阶段 Hook 从 `LATE` 改为 `NORMAL`，适配 MaiBot 1.0.10 的 Hook 调度时序变化
-- **依赖移除**：`append_extra_prompt` 不再被注入流程依赖（保留函数供外部调用），消除 `extra_prompt` 注入路径不可靠带来的失效风险
-- 修复 MaiBot ≥1.0.10 因 Hook 返回 `modified_kwargs` 中的 `messages` 修改未传递到实际模型请求的问题
-
-### v1.2.0 (2026-07-03)
-
-**兼容性修复与 session_id 捕获增强（6 项）**
-
-- 新增三级 session_id 捕获机制：`chat.receive.after_process` → `maisaka.replyer.before_request` → `maisaka.replyer.before_model_request`，逐级兜底
-- `extract_chat_fields` 增加 `messages` 列表搜索路径
-- `_match` 方法新增缓存 session 降级匹配，当 kwargs 提取不到 session_id 时，使用捕获的 session_id 查询 `_matched_sessions` 缓存
-- 修复 MaiBot ≥1.0.8 因 `hook_dispatcher` kwargs 替换逻辑导致多插件共存时私聊匹配失败的问题
-
-### v1.1.0 (2026-07-01)
-
-**初始深度优化版**
-
-- 基于 Fucarlosm/private-humanizer 深度修改
-- 提示词全面重写，配置重置为安全默认值
-- 新增时间感知、日程参考、虚拟生活环境、画像注入、回复守卫、记忆守卫、主动续话等功能
+完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。

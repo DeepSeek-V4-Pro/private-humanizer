@@ -70,8 +70,6 @@ INTIMATE_TERMS = [
     "做爱",
     "肉棒",
     "小穴",
-    "射",
-    "舔",
     "精液",
     "塞满",
     "硬了",
@@ -79,6 +77,18 @@ INTIMATE_TERMS = [
     "插进",
     "进去了",
     "受不了了",
+    "射了",
+    "射在",
+    "射进",
+    "射到",
+    "射出来",
+    "舔我",
+    "舔你",
+    "舔干净",
+    "舔着",
+    "舔弄",
+    "含住",
+    "吸吮",
 ]
 
 TOPIC_SHIFT_PATTERNS = [
@@ -111,7 +121,12 @@ class GuardResult:
 
 def is_intimate_context(*texts: str) -> bool:
     combined = "\n".join(text for text in texts if text)
-    return any(term in combined for term in INTIMATE_TERMS)
+    if not any(term in combined for term in INTIMATE_TERMS):
+        return False
+    # 排除“发射/火箭发射了”等日常用法对“射了/射在…”的误判：
+    # 只有命中词全部来自“发射”词组时才不算亲密。
+    cleaned = re.sub(r"发\s*射\w*", "", combined)
+    return any(term in cleaned for term in INTIMATE_TERMS)
 
 
 def _is_topic_shift_reply(text: str) -> bool:
@@ -264,6 +279,7 @@ def guard_memory_items(items: Any, config: HumanizerConfig) -> tuple[Any, list[s
                     "纪念日", "生日", "最爱", "最喜欢", "礼物", "共同经历",
                     "第一次", "相遇", "认识那天", "从小就", "一直都",
                     "每次都会", "从来不会", "天生", "性格就是",
+                    "用户喜欢", "用户爱", "用户讨厌", "用户偏好", "用户习惯", "用户口味",
                 )
             )
         )

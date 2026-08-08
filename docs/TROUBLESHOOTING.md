@@ -31,16 +31,19 @@ private-humanizer/
 4. 当前消息是否来自私聊。群聊会被跳过。
 5. 如果适配器没有传 `user_id`，可以尝试填写 `target_session_ids` 或在画像里填写 `session_id`。
 
-## 群聊也触发了
+## 群聊不再触发（泄露修复说明）
 
-确认：
+自 v1.6.0 起，插件按以下三层规则判断，群聊提示词注入已被硬拦截：
 
-```toml
-[plugin]
-private_only = true
-```
+1. 会话 ID 形态：`qq_group_*` / `group_*` 等群形态会话 ID 在任何 hook 上都会直接拒绝，即使历史缓存曾被误标记为私聊也会被清掉（去毒）。
+2. receive 阶段确认：入站消息按 `message_info.group_info` 判断群/私聊；目标用户私聊会写入确认缓存，群消息会主动清除匹配缓存。
+3. 提示词文本兜底只允许明确私聊形态（`qq_private_*` 等）的会话走；空 session_id、未知形态一律拒绝，避免文本误匹配。
 
-如果仍然触发，说明当前适配器传入的 hook payload 中没有明确的群聊字段。可以临时把目标限制为 `target_session_ids`，只允许指定私聊 session 生效。
+如果仍出现群聊注入，请确认：
+
+- 插件目录已更新到修复版（检查 `private_humanizer/matching.py` 是否存在）。
+- 修改配置后在 WebUI 重载插件或重启 MaiBot（`on_config_update` 会清空旧缓存）。
+- 群聊会话 ID 是否被适配器改写成了非标准形态（此时可临时把目标限制为 `target_session_ids`）。
 
 ## 中文显示乱码
 

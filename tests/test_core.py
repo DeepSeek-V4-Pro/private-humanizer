@@ -8,8 +8,15 @@ if _PLUGIN_DIR_TEXT not in sys.path:
 
 import unittest
 
-from private_humanizer.config import load_config
-from private_humanizer.context import _is_private, extract_chat_fields, match_target_private_chat
+from private_humanizer.config import HumanizerConfig, load_config
+from private_humanizer.context import (
+    chat_type_from_message,
+    classify_session_id,
+    extract_chat_fields,
+    extract_last_user_message,
+    is_definitely_group,
+    is_definitely_private,
+)
 from private_humanizer.guards import (
     INTIMATE_BRIDGE_FALLBACKS,
     INTIMATE_TERMS,
@@ -17,7 +24,9 @@ from private_humanizer.guards import (
     guard_reply_text,
     is_intimate_context,
 )
+from private_humanizer.matching import Matcher, MatchResult
 from private_humanizer.prompting import append_extra_prompt, build_humanizer_prompt
+from private_humanizer.session import SessionTracker
 
 
 RAW_CONFIG = {
@@ -47,11 +56,17 @@ RAW_CONFIG = {
 }
 
 
+_EMPTY_SESSION = SessionTracker()
+
+
 class CoreTest(unittest.TestCase):
+    def _matcher(self, config: HumanizerConfig | None = None) -> Matcher:
+        return Matcher(config or load_config(RAW_CONFIG), _EMPTY_SESSION)
+
     def test_matches_target_private_chat(self):
         config = load_config(RAW_CONFIG)
-        match = match_target_private_chat(
-            config,
+        matcher = self._matcher(config)
+        match = matcher.match(
             {"message": {"platform": "qq", "user_id": "123456789", "chat_type": "private"}},
         )
         self.assertTrue(match.matched)
@@ -59,18 +74,23 @@ class CoreTest(unittest.TestCase):
 
     def test_skips_group_chat(self):
         config = load_config(RAW_CONFIG)
-        match = match_target_private_chat(
-            config,
+        matcher = self._matcher(config)
+        match = matcher.match(
             {"message": {"platform": "qq", "user_id": "123456789", "group_id": "123", "chat_type": "group"}},
         )
         self.assertFalse(match.matched)
 
-    def test_is_private_with_unknown_chat_type_and_no_group_id(self):
-        self.assertTrue(_is_private({"group_id": "", "chat_type": ""}))
-        self.assertTrue(_is_private({"group_id": "", "chat_type": "private"}))
-        self.assertFalse(_is_private({"group_id": "", "chat_type": "group"}))
-        self.assertFalse(_is_private({"group_id": "123", "chat_type": ""}))
-        self.assertFalse(_is_private({"group_id": "", "chat_type": "unknown"}))
+    def test_is_definitely_private_checks(self):
+        self.assertTrue(is_definitely_private({"chat_type": "private"}))
+        self.assertTrue(is_definitely_private({"chat_type": "dm"}))
+        self.assertFalse(is_definitely_private({"chat_type": "group"}))
+        self.assertFalse(is_definitely_private({"chat_type": "", "group_id": "123"}))
+
+    def test_is_definitely_group_checks(self):
+        self.assertTrue(is_definitely_group({"chat_type": "group"}))
+        self.assertTrue(is_definitely_group({"group_id": "123", "chat_type": ""}))
+        self.assertFalse(is_definitely_group({"chat_type": "private"}))
+        self.assertFalse(is_definitely_group({"chat_type": "", "group_id": ""}))
 
     def test_extract_chat_fields_from_nested_message(self):
         fields = extract_chat_fields({
@@ -159,12 +179,17 @@ class CoreTest(unittest.TestCase):
         self.assertNotIn("亲", INTIMATE_TERMS)
         self.assertNotIn("吻", INTIMATE_TERMS)
         self.assertNotIn("抱", INTIMATE_TERMS)
+        self.assertNotIn("射", INTIMATE_TERMS)
+        self.assertNotIn("舔", INTIMATE_TERMS)
 
     def test_is_intimate_context_only_matches_explicit(self):
         self.assertTrue(is_intimate_context("我想要做爱"))
         self.assertTrue(is_intimate_context("肉棒"))
         self.assertFalse(is_intimate_context("今天身体不舒服"))
         self.assertFalse(is_intimate_context("亲，你好呀"))
+        self.assertFalse(is_intimate_context("今天发射了火箭"))
+        self.assertFalse(is_intimate_context("他是一条舔狗"))
+        self.assertTrue(is_intimate_context("射在里面了"))
 
     def test_memory_guard_filters_risky_items(self):
         config = load_config(RAW_CONFIG)
@@ -178,6 +203,16 @@ class CoreTest(unittest.TestCase):
         self.assertEqual(filtered, {"good": "hello"})
         self.assertGreater(len(blocked), 0)
 
+    def test_memory_guard_blocks_risky_situation_string(self):
+        config = load_config(RAW_CONFIG)
+        filtered, blocked = guard_memory_items("用户最喜欢桃子汽水", config)
+        self.assertIsNone(filtered)
+        self.assertEqual(len(blocked), 1)
+
+        filtered_safe, blocked_safe = guard_memory_items("用户今天说要加班", config)
+        self.assertEqual(filtered_safe, "用户今天说要加班")
+        self.assertEqual(blocked_safe, [])
+
     def test_followup_config_defaults(self):
         config = load_config(RAW_CONFIG)
         self.assertTrue(config.proactive_followup.enabled)
@@ -189,8 +224,8 @@ class CoreTest(unittest.TestCase):
 
     def test_standard_user_id_mismatch_is_not_target(self):
         config = load_config(RAW_CONFIG)
-        match = match_target_private_chat(
-            config,
+        matcher = self._matcher(config)
+        match = matcher.match(
             {"session_id": "abc", "platform": "qq", "user_id": "not-target", "chat_type": "private"},
         )
         self.assertFalse(match.matched)
@@ -206,6 +241,351 @@ class CoreTest(unittest.TestCase):
     def test_config_load_handles_none(self):
         config = load_config(None)
         self.assertTrue(config.plugin.enabled)
+
+    def test_config_bool_strings_are_parsed(self):
+        """字符串形式的布尔配置不能按 Python bool() 语义误解析（"false" -> True）。"""
+        config = load_config({
+            "plugin": {
+                "enabled": "false",
+                "private_only": "false",
+                "target_platforms": ["qq"],
+                "target_user_ids": ["123456789"],
+            },
+            "guard": {
+                "memory_guard_enabled": "false",
+                "style_guard_enabled": "false",
+            },
+            "logging": {"enabled": "false"},
+        })
+        self.assertFalse(config.plugin.enabled)
+        self.assertFalse(config.plugin.private_only)
+        self.assertFalse(config.guard.memory_guard_enabled)
+        self.assertFalse(config.guard.style_guard_enabled)
+        self.assertFalse(config.logging.enabled)
+
+        config_true = load_config({
+            "plugin": {"enabled": "true", "private_only": "on"},
+        })
+        self.assertTrue(config_true.plugin.enabled)
+        self.assertTrue(config_true.plugin.private_only)
+
+
+    def test_matches_target_without_explicit_chat_type(self):
+        config = load_config(RAW_CONFIG)
+        sessions = SessionTracker()
+        matcher = Matcher(config, sessions)
+        match = matcher.match(
+            {"platform": "qq", "user_id": "123456789"},
+        )
+        self.assertTrue(
+            match.matched,
+            f"Should match target user even without chat_type in kwargs (reason={match.reason})",
+        )
+
+    def test_matches_via_captured_chat_type(self):
+        config = load_config(RAW_CONFIG)
+        sessions = SessionTracker()
+        sessions.capture("sess_001", chat_type="private")
+        matcher = Matcher(config, sessions)
+        match = matcher.match(
+            {"session_id": "sess_001", "platform": "qq", "user_id": "123456789"},
+        )
+        self.assertTrue(match.matched)
+
+    # ------------------------------------------------------------------
+    # 泄露修复：群聊会话 ID 形态识别与硬拦截
+    # ------------------------------------------------------------------
+
+    def test_group_session_id_never_matches_in_model_hook(self):
+        """Replyer/Planner hook 只有 session_id=qq_group_xxx 时，即使文本里有目标称呼也不注入。"""
+        config = load_config(RAW_CONFIG)
+        sessions = SessionTracker()
+        matcher = Matcher(config, sessions)
+        match = matcher.match(
+            {
+                "session_id": "qq_group_1049246517",
+                "messages": [{"role": "user", "content": "目标用户今天在群里说了什么呀"}],
+            },
+        )
+        self.assertFalse(match.matched)
+
+    def test_group_session_id_rejects_even_with_target_user_id(self):
+        config = load_config(RAW_CONFIG)
+        matcher = Matcher(config, SessionTracker())
+        match = matcher.match(
+            {
+                "session_id": "qq_group_1049246517",
+                "user_id": "123456789",
+                "chat_type": "group",
+            },
+        )
+        self.assertFalse(match.matched)
+
+    def test_poisoned_group_cache_is_rejected_and_cleaned(self):
+        """历史脏缓存（群会话被误标记为私聊）也要被硬拦截并清掉。"""
+        config = load_config(RAW_CONFIG)
+        sessions = SessionTracker()
+        sessions.mark_matched("qq_group_1049246517", chat_type="private")
+        matcher = Matcher(config, sessions)
+        match = matcher.match({"session_id": "qq_group_1049246517"})
+        self.assertFalse(match.matched)
+        self.assertFalse(sessions.is_matched("qq_group_1049246517"))
+        self.assertEqual(
+            sessions.get_captured("qq_group_1049246517").get("chat_type"),
+            "group",
+        )
+
+    def test_receive_capture_de_poisons_group_session(self):
+        """群消息在 receive 阶段就把曾经误匹配的会话缓存降级为 group。"""
+        config = load_config(RAW_CONFIG)
+        sessions = SessionTracker()
+        sessions.mark_matched("qq_group_1049246517", chat_type="private")
+        sessions.reject_group("qq_group_1049246517")
+        self.assertFalse(sessions.is_matched("qq_group_1049246517"))
+
+    # ------------------------------------------------------------------
+    # 识别修复：私聊形态会话 ID / receive 确认
+    # ------------------------------------------------------------------
+
+    def test_private_session_id_matches_without_user_id(self):
+        """Replyer/Planner hook 只有 session_id=qq_private_<target> 时也能命中。"""
+        config = load_config(RAW_CONFIG)
+        matcher = Matcher(config, SessionTracker())
+        match = matcher.match({"session_id": "qq_private_123456789"})
+        self.assertTrue(match.matched)
+        self.assertEqual(match.user_id, "123456789")
+        self.assertEqual(match.reason, "private session user matched")
+
+    def test_private_session_id_mismatch_is_not_target(self):
+        config = load_config(RAW_CONFIG)
+        matcher = Matcher(config, SessionTracker())
+        match = matcher.match({"session_id": "qq_private_999999999"})
+        self.assertFalse(match.matched)
+
+    def test_receive_capture_confirms_target_session(self):
+        """chat.receive 的序列化消息按 message_info 确认目标，之后只有 session_id 的 hook 也能命中。"""
+        config = load_config(RAW_CONFIG)
+        sessions = SessionTracker()
+        message = {
+            "platform": "qq",
+            "session_id": "qq_private_123456789",
+            "message_info": {
+                "user_info": {"user_id": "123456789", "user_nickname": "小明"},
+                "group_info": None,
+            },
+        }
+        sessions.capture(
+            str(message.get("session_id", "")),
+            chat_type=chat_type_from_message(message),
+            platform=message.get("platform", ""),
+            user_id=message["message_info"]["user_info"]["user_id"],
+        )
+        sessions.confirm_target(
+            message["session_id"],
+            platform=message["platform"],
+            user_id=message["message_info"]["user_info"]["user_id"],
+        )
+        matcher = Matcher(config, sessions)
+        match = matcher.match({"session_id": "qq_private_123456789"})
+        self.assertTrue(match.matched)
+
+    def test_receive_capture_group_not_confirmed(self):
+        config = load_config(RAW_CONFIG)
+        sessions = SessionTracker()
+        message = {
+            "platform": "qq",
+            "session_id": "qq_group_1049246517",
+            "message_info": {
+                "user_info": {"user_id": "123456789", "user_nickname": "小明"},
+                "group_info": {"group_id": "1049246517", "group_name": "测试群"},
+            },
+        }
+        self.assertEqual(chat_type_from_message(message), "group")
+        sessions.reject_group(message["session_id"])
+        matcher = Matcher(config, sessions)
+        match = matcher.match({"session_id": "qq_group_1049246517"})
+        self.assertFalse(match.matched)
+
+    def test_prompt_fallback_rejects_empty_session(self):
+        """没有 session_id 时禁止用提示词文本兜底，防止注入到无法确认的会话。"""
+        config = load_config(RAW_CONFIG)
+        matcher = Matcher(config, SessionTracker())
+        match = matcher.match(
+            {"messages": [{"role": "user", "content": "目标用户今天过得怎么样"}]},
+        )
+        self.assertFalse(match.matched)
+
+    def test_prompt_fallback_rejects_group_session_id(self):
+        config = load_config(RAW_CONFIG)
+        matcher = Matcher(config, SessionTracker())
+        match = matcher.match(
+            {
+                "session_id": "qq_group_1049246517",
+                "messages": [{"role": "user", "content": "目标用户今天在群里怎么样"}],
+            },
+        )
+        self.assertFalse(match.matched)
+
+    def test_prompt_fallback_works_for_private_session_id(self):
+        config = load_config(RAW_CONFIG)
+        matcher = Matcher(config, SessionTracker())
+        match = matcher.match(
+            {
+                "session_id": "dm_other_user",
+                "messages": [{"role": "user", "content": "目标用户今天过得怎么样"}],
+            },
+        )
+        self.assertTrue(match.matched)
+        self.assertEqual(match.reason, "prompt text matched")
+
+    def test_prompt_fallback_skips_default_profile_id(self):
+        """默认占位 profile_id="target" 不参与文本匹配，避免误命中英文 target。"""
+        config = load_config(RAW_CONFIG)
+        matcher = Matcher(config, SessionTracker())
+        match = matcher.match(
+            {
+                "session_id": "dm_other_user",
+                "messages": [{"role": "user", "content": "请把 target 设置成 100"}],
+            },
+        )
+        self.assertFalse(match.matched)
+
+    def test_extract_last_user_message(self):
+        messages = [
+            {"role": "system", "content": "system"},
+            {"role": "assistant", "content": "回复"},
+            {"role": "user", "content": "第一条"},
+            {"role": "assistant", "content": "再回复"},
+            {"role": "user", "content": ["<message user=\"A\">", "第二条"]},
+        ]
+        self.assertEqual(extract_last_user_message(messages), "<message user=\"A\">\n第二条")
+        self.assertEqual(extract_last_user_message([]), "")
+        self.assertEqual(extract_last_user_message(None), "")
+        self.assertEqual(extract_last_user_message([{"role": "assistant", "content": "x"}]), "")
+
+    def test_classify_session_id(self):
+        self.assertEqual(classify_session_id("qq_group_1049246517"), "group")
+        self.assertEqual(classify_session_id("group_123"), "group")
+        self.assertEqual(classify_session_id("qq_private_3130274394"), "private")
+        self.assertEqual(classify_session_id("private_123"), "private")
+        self.assertEqual(classify_session_id("qq_123456"), "private")
+        self.assertEqual(classify_session_id(""), "")
+        self.assertEqual(classify_session_id("random-uuid"), "")
+
+    def test_extract_chat_fields_derives_chat_type_from_session_id(self):
+        fields = extract_chat_fields({"session_id": "qq_group_1049246517"})
+        self.assertEqual(fields["chat_type"], "group")
+        fields = extract_chat_fields({"session_id": "qq_private_123456789"})
+        self.assertEqual(fields["chat_type"], "private")
+
+
+class MatcherSpecificTest(unittest.TestCase):
+    """Tests for the Matcher's internal matching strategies."""
+
+    def test_match_by_fields_direct_hit(self):
+        config = load_config(RAW_CONFIG)
+        matcher = Matcher(config, SessionTracker())
+        result = matcher._match_by_fields(
+            {"message": {"platform": "qq", "user_id": "123456789", "chat_type": "private"}},
+            config,
+        )
+        self.assertTrue(result.matched)
+        self.assertEqual(result.reason, "profile matched")
+
+    def test_match_by_fields_rejects_group(self):
+        config = load_config(RAW_CONFIG)
+        matcher = Matcher(config, SessionTracker())
+        result = matcher._match_by_fields(
+            {"message": {"platform": "qq", "user_id": "123456789", "chat_type": "group", "group_id": "g1"}},
+            config,
+        )
+        self.assertFalse(result.matched)
+        self.assertEqual(result.reason, "not private chat")
+
+    def test_match_by_fields_uncertain_returns_not_target(self):
+        config = load_config(RAW_CONFIG)
+        matcher = Matcher(config, SessionTracker())
+        result = matcher._match_by_fields(
+            {"message": {"platform": "qq", "user_id": "999", "chat_type": "private"}},
+            config,
+        )
+        self.assertFalse(result.matched)
+        self.assertEqual(result.reason, "not target")
+
+    def test_session_cache_match_works_after_confirmation(self):
+        config = load_config(RAW_CONFIG)
+        sessions = SessionTracker()
+        sessions.confirm_target("sess_001", platform="qq", user_id="123456789")
+        matcher = Matcher(config, sessions)
+        result = matcher._match_by_session(
+            {"session_id": "sess_001", "platform": "qq", "user_id": "123456789"},
+            config,
+        )
+        self.assertTrue(result.matched)
+        self.assertEqual(result.reason, "cached matched session")
+
+    def test_session_cache_does_not_match_unconfirmed_session(self):
+        config = load_config(RAW_CONFIG)
+        matcher = Matcher(config, SessionTracker())
+        result = matcher._match_by_session(
+            {"session_id": "unknown_sess"},
+            config,
+        )
+        self.assertFalse(result.matched)
+
+    def test_prompt_match_does_not_fire_in_group_text(self):
+        config = load_config(RAW_CONFIG)
+        matcher = Matcher(config, SessionTracker())
+        result = matcher._match_by_prompt(
+            {
+                "messages": [{"role": "user", "content": "今天在群聊里聊到目标用户的事情"}],
+                "group_id": "123",
+            },
+            config,
+        )
+        self.assertFalse(result.matched)
+
+    def test_prompt_match_fires_with_name_in_private_text(self):
+        config = load_config(RAW_CONFIG)
+        matcher = Matcher(config, SessionTracker())
+        result = matcher._match_by_prompt(
+            {
+                "session_id": "qq_private_123456789",
+                "messages": [{"role": "user", "content": "目标用户今天过得怎么样"}],
+            },
+            config,
+        )
+        self.assertTrue(result.matched)
+        self.assertEqual(result.reason, "prompt text matched")
+
+
+class ContextFunctionTest(unittest.TestCase):
+    """Test pure context extraction functions."""
+
+    def test_extract_chat_fields_flat(self):
+        fields = extract_chat_fields({"platform": "qq", "user_id": "u1", "chat_type": "private"})
+        self.assertEqual(fields["platform"], "qq")
+        self.assertEqual(fields["user_id"], "u1")
+        self.assertEqual(fields["chat_type"], "private")
+
+    def test_extract_chat_fields_missing(self):
+        fields = extract_chat_fields({"some_other_key": "x"})
+        self.assertEqual(fields["platform"], "")
+        self.assertEqual(fields["user_id"], "")
+        self.assertEqual(fields["chat_type"], "")
+
+    def test_extract_chat_fields_from_messages(self):
+        fields = extract_chat_fields({
+            "messages": [{"user_id": "u1", "chat_type": "private"}],
+        })
+        self.assertEqual(fields["user_id"], "u1")
+
+    def test_extract_chat_fields_multiple_sources(self):
+        fields = extract_chat_fields({
+            "message": {"user_id": "from_msg"},
+            "metadata": {"user_id": "from_meta"},
+        })
+        self.assertEqual(fields["user_id"], "from_msg")
 
 
 if __name__ == "__main__":

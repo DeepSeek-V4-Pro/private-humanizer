@@ -1,38 +1,63 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
-from .config import HumanizerConfig, TargetProfile
+from .constants import (
+    CHAT_TYPE_SEARCH_ORDER,
+    GROUP_HINTS,
+    GROUP_ID_SEARCH_ORDER,
+    GROUP_KEY_HINTS,
+    GROUP_SESSION_PREFIXES,
+    NESTED_CONTAINER_KEYS,
+    PLATFORM_SEARCH_ORDER,
+    PRIVATE_HINTS,
+    PRIVATE_SESSION_PREFIXES,
+    SESSION_SEARCH_ORDER,
+    FIELD_SEARCH_ORDER,
+)
 
 
-PRIVATE_HINTS = {"private", "friend", "direct", "dm", "单聊", "私聊", "person"}
-GROUP_HINTS = {"group", "guild", "channel", "群聊", "群"}
+def classify_session_id(session_id: str) -> str:
+    """根据会话 ID 形态判断聊天类型：group / private / ""（未知）。
+
+    MaiBot 的 stream/session id 自带类型前缀：
+    - 群聊：qq_group_1049246517
+    - 私聊：qq_private_3130274394
+    """
+    sid = str(session_id or "").strip().lower()
+    if not sid:
+        return ""
+    if sid.startswith(GROUP_SESSION_PREFIXES) or "_group_" in sid:
+        return "group"
+    if sid.startswith(PRIVATE_SESSION_PREFIXES):
+        return "private"
+    # 兼容历史形态：qq_<纯数字> 视为私聊
+    if sid.startswith("qq_") and sid[3:].isdigit():
+        return "private"
+    return ""
 
 
-@dataclass(slots=True)
-class MatchResult:
-    matched: bool
-    profile: TargetProfile | None = None
-    reason: str = ""
-    platform: str = ""
-    user_id: str = ""
-    session_id: str = ""
-    group_id: str = ""
-    chat_type: str = ""
+def chat_type_from_message(message: dict[str, Any]) -> str:
+    """从 chat.receive 的序列化 SessionMessage 推导聊天类型。
+
+    优先看 message_info.group_info 是否为空，其次看 session_id 形态。
+    入站消息里没有 chat_type 字段，必须按群信息/会话 ID 推导。
+    """
+    if not isinstance(message, dict):
+        return ""
+    message_info = message.get("message_info") or {}
+    if isinstance(message_info, dict) and message_info.get("group_info"):
+        return "group"
+    derived = classify_session_id(str(message.get("session_id", "") or ""))
+    if derived:
+        return derived
+    # 无群信息且会话形态未知时，入站阶段按私聊处理（与主程序 is_group 判定一致）
+    return "private"
 
 
 def extract_chat_fields(kwargs: dict[str, Any]) -> dict[str, str]:
     candidates: list[dict[str, Any]] = [kwargs]
-    for key in (
-        "message",
-        "target_message",
-        "chat_info",
-        "session",
-        "metadata",
-        "event",
-        "reply_tool_args",
-    ):
+    for key in NESTED_CONTAINER_KEYS:
         value = kwargs.get(key)
         if isinstance(value, dict):
             candidates.append(value)
@@ -51,62 +76,93 @@ def extract_chat_fields(kwargs: dict[str, Any]) -> dict[str, str]:
                     return str(value).strip()
         return ""
 
-    chat_type = first("chat_type", "message_type", "conversation_type")
+    chat_type = first(*CHAT_TYPE_SEARCH_ORDER).lower()
+    if not chat_type:
+        session_id = first(*SESSION_SEARCH_ORDER)
+        chat_type = classify_session_id(session_id)
+
     return {
-        "platform": first("platform", "adapter", "platform_name"),
-        "user_id": first("user_id", "sender_id", "from_user_id", "person_id", "target_user_id"),
-        "session_id": first("session_id", "chat_id", "stream_id", "conversation_id"),
-        "group_id": first("group_id", "guild_id", "channel_id"),
-        "chat_type": chat_type.lower(),
+        "platform": first(*PLATFORM_SEARCH_ORDER),
+        "user_id": first(*FIELD_SEARCH_ORDER),
+        "session_id": first(*SESSION_SEARCH_ORDER),
+        "group_id": first(*GROUP_ID_SEARCH_ORDER),
+        "chat_type": chat_type,
     }
 
 
-def _is_private(fields: dict[str, str]) -> bool:
+def extract_last_user_message(messages: Any, limit: int = 500) -> str:
+    """从模型消息列表里取最近一条 user 消息文本。
+
+    after_response 等 hook 的 kwargs 里没有用户消息，回复守卫/主动续话
+    需要依赖 before_model_request 阶段缓存下来的最近用户发言。
+    """
+    if not isinstance(messages, list):
+        return ""
+
+    def content_text(content: Any) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict):
+                    for key in ("text", "content", "content_text"):
+                        value = item.get(key)
+                        if isinstance(value, str) and value.strip():
+                            parts.append(value)
+                            break
+            return "\n".join(parts)
+        return ""
+
+    for item in reversed(messages):
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("role") or "").lower() != "user":
+            continue
+        text = content_text(item.get("content") or item.get("content_text") or "")
+        text = text.strip()
+        if text:
+            return text[:limit]
+    return ""
+
+
+def has_group_id(fields: dict[str, str]) -> bool:
+    return bool(fields.get("group_id", ""))
+
+
+def has_group_keywords(text: str) -> bool:
+    from .constants import GROUP_TEXT_SIGNALS
+    return any(signal in text for signal in GROUP_TEXT_SIGNALS)
+
+
+def classify_chat_type(fields: dict[str, str]) -> str:
     chat_type = fields.get("chat_type", "").lower()
-    group_id = fields.get("group_id", "")
-    if group_id:
-        return False
+    if chat_type in PRIVATE_HINTS:
+        return "private"
     if chat_type in GROUP_HINTS:
-        return False
+        return "group"
+    if has_group_id(fields):
+        return "group"
+    return ""
+
+
+def is_definitely_private(fields: dict[str, str]) -> bool:
+    chat_type = fields.get("chat_type", "").lower()
     if chat_type in PRIVATE_HINTS:
         return True
-    if chat_type:
-        return False
-    return not group_id
+    if classify_session_id(fields.get("session_id", "")) == "private":
+        return True
+    return False
 
 
-def match_target_private_chat(config: HumanizerConfig, kwargs: dict[str, Any]) -> MatchResult:
-    if not config.plugin.enabled:
-        return MatchResult(False, reason="plugin disabled")
-
-    fields = extract_chat_fields(kwargs)
-    platform = fields["platform"]
-    user_id = fields["user_id"]
-    session_id = fields["session_id"]
-    chat_type = fields["chat_type"]
-
-    if config.plugin.private_only and not _is_private(fields):
-        return MatchResult(False, reason="not private chat", **fields)
-
-    if config.plugin.target_platforms and platform and platform not in config.plugin.target_platforms:
-        return MatchResult(False, reason="platform mismatch", **fields)
-
-    for profile in config.target_profiles:
-        if profile.platform:
-            profile_platform_ok = not platform or profile.platform == platform
-        else:
-            profile_platform_ok = not config.plugin.target_platforms or not platform or platform in config.plugin.target_platforms
-        user_ok = bool(profile.user_id and profile.user_id == user_id)
-        session_ok = bool(profile.session_id and profile.session_id == session_id)
-        if profile_platform_ok and (user_ok or session_ok):
-            return MatchResult(True, profile=profile, reason="profile matched", **fields)
-
-    if user_id and user_id in config.plugin.target_user_ids:
-        profile = TargetProfile(profile_id=user_id, platform=platform, user_id=user_id)
-        return MatchResult(True, profile=profile, reason="user_id matched", **fields)
-
-    if session_id and session_id in config.plugin.target_session_ids:
-        profile = TargetProfile(profile_id=session_id, platform=platform, session_id=session_id)
-        return MatchResult(True, profile=profile, reason="session_id matched", **fields)
-
-    return MatchResult(False, reason="not target", **fields)
+def is_definitely_group(fields: dict[str, str]) -> bool:
+    chat_type = fields.get("chat_type", "").lower()
+    if chat_type in GROUP_HINTS:
+        return True
+    if has_group_id(fields):
+        return True
+    if classify_session_id(fields.get("session_id", "")) == "group":
+        return True
+    return False
